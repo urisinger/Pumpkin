@@ -1,8 +1,6 @@
-use crate::command::tree_builder::require;
 use crate::command::{
     args::ConsumedArgs, tree::CommandTree, CommandError, CommandExecutor, CommandSender,
 };
-use crate::entity::player::PermissionLvl;
 use async_trait::async_trait;
 use pumpkin_core::text::click::ClickEvent;
 use pumpkin_core::text::hover::HoverEvent;
@@ -55,9 +53,5 @@ impl CommandExecutor for PumpkinExecutor {
 }
 
 pub fn init_command_tree() -> CommandTree {
-    CommandTree::new(NAMES, DESCRIPTION)
-        .with_child(require(|sender| {
-            sender.has_permission_lvl(PermissionLvl::Two)
-        }))
-        .execute(PumpkinExecutor)
+    CommandTree::new(NAMES, DESCRIPTION).execute(PumpkinExecutor)
 }
