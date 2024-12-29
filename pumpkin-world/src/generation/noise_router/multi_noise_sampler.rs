@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     generation::biome_coords, noise_router::density_function_ast::WrapperType,
     GlobalProtoNoiseRouter,
@@ -12,6 +14,20 @@ use super::{
     density_function::{NoiseFunctionComponentRange, PassThrough, UnblendedNoisePos},
     proto_noise_router::ProtoNoiseFunctionComponent,
 };
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct NoiseValuePoint {
+    pub temperature: i64,
+    pub erosion: i64,
+    pub depth: i64,
+    pub continentalness: i64,
+    pub weirdness: i64,
+    pub humidity: i64,
+}
+
+pub fn to_long(value: f64) -> i64 {
+    (value * 10000.0) as i64
+}
 
 pub struct MultiNoiseSamplerBuilderOptions {
     // The biome coords of this chunk
@@ -45,7 +61,7 @@ pub struct MultiNoiseSampler<'a> {
 }
 
 impl<'a> MultiNoiseSampler<'a> {
-    pub fn sample(&mut self, biome_x: i32, biome_y: i32, biome_z: i32) {
+    pub fn sample(&mut self, biome_x: i32, biome_y: i32, biome_z: i32) -> NoiseValuePoint {
         let block_x = biome_coords::to_block(biome_x);
         let block_y = biome_coords::to_block(biome_y);
         let block_z = biome_coords::to_block(biome_z);
@@ -54,43 +70,50 @@ impl<'a> MultiNoiseSampler<'a> {
         let sample_options =
             ChunkNoiseFunctionSampleOptions::new(false, SampleAction::SkipCellCaches, 0, 0, 0);
 
-        let _temperature = ChunkNoiseFunctionComponent::sample_from_stack(
+        let temperature = to_long(ChunkNoiseFunctionComponent::sample_from_stack(
             &mut self.component_stack[..=self.temperature],
             &pos,
             &sample_options,
-        ) as f32;
+        ));
 
-        let _humidity = ChunkNoiseFunctionComponent::sample_from_stack(
+        let humidity = to_long(ChunkNoiseFunctionComponent::sample_from_stack(
             &mut self.component_stack[..=self.vegetation],
             &pos,
             &sample_options,
-        ) as f32;
+        ));
 
-        let _continentalness = ChunkNoiseFunctionComponent::sample_from_stack(
+        let continentalness = to_long(ChunkNoiseFunctionComponent::sample_from_stack(
             &mut self.component_stack[..=self.continents],
             &pos,
             &sample_options,
-        ) as f32;
+        ));
 
-        let _erosion = ChunkNoiseFunctionComponent::sample_from_stack(
+        let erosion = to_long(ChunkNoiseFunctionComponent::sample_from_stack(
             &mut self.component_stack[..=self.erosion],
             &pos,
             &sample_options,
-        ) as f32;
+        ));
 
-        let _depth = ChunkNoiseFunctionComponent::sample_from_stack(
+        let depth = to_long(ChunkNoiseFunctionComponent::sample_from_stack(
             &mut self.component_stack[..=self.depth],
             &pos,
             &sample_options,
-        ) as f32;
+        ));
 
-        let _weirdness = ChunkNoiseFunctionComponent::sample_from_stack(
+        let weirdness = to_long(ChunkNoiseFunctionComponent::sample_from_stack(
             &mut self.component_stack[..=self.ridges],
             &pos,
             &sample_options,
-        ) as f32;
+        ));
 
-        // TODO: Multi noise value here
+        NoiseValuePoint {
+            temperature,
+            erosion,
+            depth,
+            continentalness,
+            weirdness,
+            humidity,
+        }
     }
 
     pub fn generate(

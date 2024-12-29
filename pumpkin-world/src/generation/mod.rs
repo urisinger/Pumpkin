@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub mod aquifer_sampler;
+pub mod biome_search_tree;
 mod blender;
 pub mod chunk_noise;
 pub mod generation_shapes;
