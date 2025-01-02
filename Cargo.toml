@@ -55,6 +55,13 @@ uuid = { version = "1.13", features = ["serde", "v3", "v4"] }
 derive_more = { version = "2.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+<<<<<<< HEAD
 serde_with = "3.12"
+=======
+<<<<<<< HEAD
+>>>>>>> 8d62705 (add biome entries serde and fix search tree)
 
 async-trait = "0.1"
+=======
+serde_with = "3.12"
+>>>>>>> d729080 (add biome entries serde)
