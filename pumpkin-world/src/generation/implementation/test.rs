@@ -5,15 +5,14 @@ use std::{
 
 use dashmap::{DashMap, Entry};
 use num_traits::Zero;
-use pumpkin_core::math::{vector2::Vector2, vector3::Vector3};
+use pumpkin_data::chunk::Biome;
+use pumpkin_util::math::{vector2::Vector2, vector3::Vector3};
 
 use crate::{
-    biome::{Biome, BiomeSupplierImpl},
+    biome::BiomeSupplier,
     block::block_state::BlockState,
-    chunk::{ChunkBlocks, ChunkData},
-    coordinates::{
-        ChunkRelativeBlockCoordinates, ChunkRelativeXZBlockCoordinates, XZBlockCoordinates,
-    },
+    chunk::{ChunkData, Subchunks},
+    coordinates::{ChunkRelativeBlockCoordinates, ChunkRelativeXZBlockCoordinates},
     generation::{
         generator::{GeneratorInit, TerrainGenerator},
         proto_chunk::ProtoChunk,
@@ -22,12 +21,12 @@ use crate::{
     WORLD_LOWEST_Y, WORLD_MAX_Y,
 };
 
-pub struct TestGenerator<B: BiomeSupplierImpl + Send + Sync, T: TerrainGenerator> {
+pub struct TestGenerator<B: BiomeSupplier + Send + Sync, T: TerrainGenerator> {
     biome_generator: B,
     terrain_generator: T,
 }
 
-impl<B: BiomeSupplierImpl + GeneratorInit + Send + Sync, T: TerrainGenerator + GeneratorInit>
+impl<B: BiomeSupplier + GeneratorInit + Send + Sync, T: TerrainGenerator + GeneratorInit>
     GeneratorInit for TestGenerator<B, T>
 {
     fn new(seed: Seed) -> Self {
@@ -38,11 +37,9 @@ impl<B: BiomeSupplierImpl + GeneratorInit + Send + Sync, T: TerrainGenerator + G
     }
 }
 
-impl<B: BiomeSupplierImpl + Send + Sync, T: TerrainGenerator> WorldGenerator
-    for TestGenerator<B, T>
-{
+impl<B: BiomeSupplier + Send + Sync, T: TerrainGenerator> WorldGenerator for TestGenerator<B, T> {
     fn generate_chunk(&self, at: Vector2<i32>) -> ChunkData {
-        let mut blocks = ChunkBlocks::default();
+        let mut subchunks = Subchunks::Single(0);
         self.terrain_generator.prepare_chunk(&at);
 
         for x in 0..16u8 {
@@ -70,14 +67,15 @@ impl<B: BiomeSupplierImpl + Send + Sync, T: TerrainGenerator> WorldGenerator
                     );
 
                     //println!("{:?}: {:?}", coordinates, block);
-                    blocks.set_block(coordinates, block.state_id);
+                    subchunks.set_block(coordinates, block.state_id);
                 }
             }
         }
 
         self.terrain_generator.clean_chunk(&at);
         ChunkData {
-            blocks,
+            subchunks,
+            heightmap: Default::default(),
             position: at,
         }
     }

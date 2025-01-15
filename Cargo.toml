@@ -2,14 +2,13 @@
 resolver = "2"
 members = [
     "pumpkin-config",
-    "pumpkin-core",
-    "pumpkin-entity",
+    "pumpkin-util",
     "pumpkin-inventory",
     "pumpkin-macros/",
     "pumpkin-protocol/",
     "pumpkin-registry/",
     "pumpkin-world",
-    "pumpkin/",
+    "pumpkin/", "pumpkin-data",
 ]
 
 [workspace.package]

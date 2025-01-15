@@ -3,6 +3,7 @@ name = "pumpkin"
 version = "0.1.0-dev"
 description = "Empowering everyone to host fast and efficient Minecraft servers."
 edition = "2021"
+rust-version = "1.83"
 
 [package.metadata.tauri-winres]
 # FileDescription is handled as the Program name by Windows!
@@ -12,11 +13,11 @@ LegalCopyright = "Copyright © 2025 Aleksander Medvedev"
 
 [dependencies]
 # pumpkin
-pumpkin-core = { path = "../pumpkin-core" }
+pumpkin-util = { path = "../pumpkin-util" }
 pumpkin-config = { path = "../pumpkin-config" }
 pumpkin-inventory = { path = "../pumpkin-inventory" }
 pumpkin-world = { path = "../pumpkin-world" }
-pumpkin-entity = { path = "../pumpkin-entity" }
+pumpkin-data = { path = "../pumpkin-data" }
 pumpkin-protocol = { path = "../pumpkin-protocol" }
 pumpkin-registry = { path = "../pumpkin-registry" }
 pumpkin-macros = { path = "../pumpkin-macros" }

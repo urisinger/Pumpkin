@@ -1,9 +1,10 @@
 use noise::{NoiseFn, Perlin};
-use pumpkin_core::math::vector2::Vector2;
+use pumpkin_util::math::vector2::Vector2;
 
 use crate::{
-    biome::BiomeSupplierImpl,
-    chunk::{ChunkBlocks, ChunkData},
+    biome::BiomeSupplier,
+    chunk::ChunkData,
+    chunk::{ChunkData, Subchunks},
     coordinates::{ChunkRelativeBlockCoordinates, ChunkRelativeXZBlockCoordinates},
     WORLD_LOWEST_Y,
 };
@@ -13,7 +14,7 @@ use super::{
     Seed,
 };
 
-pub struct GenericGenerator<B: BiomeSupplierImpl + Send + Sync, T: PerlinTerrainGenerator> {
+pub struct GenericGenerator<B: BiomeSupplier + Send + Sync, T: PerlinTerrainGenerator> {
     biome_generator: B,
     terrain_generator: T,
     // TODO: May make this optional?. But would be pain to use in most biomes then. Maybe make a new trait like
@@ -39,7 +40,7 @@ impl<B: BiomeSupplierImpl + Send + Sync, T: PerlinTerrainGenerator> WorldGenerat
     for GenericGenerator<B, T>
 {
     fn generate_chunk(&self, at: Vector2<i32>) -> ChunkData {
-        let mut blocks = ChunkBlocks::default();
+        let mut subchunks = Subchunks::Single(0);
         self.terrain_generator.prepare_chunk(&at, &self.perlin);
         let noise_value = self.perlin.get([at.x as f64 / 16.0, at.z as f64 / 16.0]);
 
@@ -69,7 +70,7 @@ impl<B: BiomeSupplierImpl + Send + Sync, T: PerlinTerrainGenerator> WorldGenerat
                     self.terrain_generator.generate_block(
                         coordinates,
                         coordinates.with_chunk_coordinates(at),
-                        &mut blocks,
+                        &mut subchunks,
                         chunk_height,
                         biome,
                     );
@@ -78,7 +79,8 @@ impl<B: BiomeSupplierImpl + Send + Sync, T: PerlinTerrainGenerator> WorldGenerat
         }
 
         ChunkData {
-            blocks,
+            subchunks,
+            heightmap: Default::default(),
             position: at,
         }
     }

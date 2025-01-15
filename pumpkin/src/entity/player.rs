@@ -1,7 +1,7 @@
 use std::{
     num::NonZeroU8,
     sync::{
-        atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicU8},
+        atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicU8, Ordering},
         Arc,
     },
     time::{Duration, Instant},
@@ -9,23 +9,11 @@ use std::{
 
 use crossbeam::atomic::AtomicCell;
 use pumpkin_config::{ADVANCED_CONFIG, BASIC_CONFIG};
-use pumpkin_core::{
-    math::{
-        boundingbox::{BoundingBox, BoundingBoxSize},
-        position::WorldPosition,
-        vector2::Vector2,
-        vector3::Vector3,
-    },
-    permission::PermissionLvl,
-    text::TextComponent,
-    GameMode,
+use pumpkin_data::{
+    entity::EntityType,
+    sound::{Sound, SoundCategory},
 };
-use pumpkin_entity::{entity_type::EntityType, EntityId};
 use pumpkin_inventory::player::PlayerInventory;
-use pumpkin_macros::sound;
-use pumpkin_protocol::server::play::{
-    SCloseContainer, SCookieResponse as SPCookieResponse, SPlayPingRequest,
-};
 use pumpkin_protocol::{
     bytebuf::packet_id::Packet,
     client::play::{
@@ -40,12 +28,29 @@ use pumpkin_protocol::{
         SPlayerRotation, SSetCreativeSlot, SSetHeldItem, SSetPlayerGround, SSwingArm, SUseItem,
         SUseItemOn,
     },
-    RawPacket, ServerPacket, SoundCategory,
+    RawPacket, ServerPacket,
+};
+use pumpkin_protocol::{
+    client::play::CSoundEffect,
+    server::play::{
+        SCloseContainer, SCookieResponse as SPCookieResponse, SPlayPingRequest, SPlayerLoaded,
+    },
 };
 use pumpkin_protocol::{client::play::CUpdateTime, codec::var_int::VarInt};
 use pumpkin_protocol::{
     client::play::{CSetEntityMetadata, Metadata},
     server::play::{SClickContainer, SKeepAlive},
+};
+use pumpkin_util::{
+    math::{
+        boundingbox::{BoundingBox, BoundingBoxSize},
+        position::BlockPos,
+        vector2::Vector2,
+        vector3::Vector3,
+    },
+    permission::PermissionLvl,
+    text::TextComponent,
+    GameMode,
 };
 use pumpkin_world::{
     cylindrical_chunk_iterator::Cylindrical,
@@ -56,7 +61,7 @@ use pumpkin_world::{
 };
 use tokio::sync::{Mutex, Notify, RwLock};
 
-use super::Entity;
+use super::{Entity, EntityId};
 use crate::{
     command::{client_cmd_suggestions, dispatcher::CommandDispatcher},
     data::op_data::OPERATOR_CONFIG,
@@ -122,6 +127,10 @@ pub struct Player {
     pub permission_lvl: AtomicCell<PermissionLvl>,
     /// Tell tasks to stop if we are closing
     cancel_tasks: Notify,
+    /// whether the client has reported it has loaded
+    pub client_loaded: AtomicBool,
+    /// timeout (in ticks) client has to report it has finished loading.
+    pub client_loaded_timeout: AtomicU32,
 }
 
 impl Player {
@@ -158,6 +167,7 @@ impl Player {
                     entity_id,
                     player_uuid,
                     world,
+                    Vector3::new(0.0, 0.0, 0.0),
                     EntityType::Player,
                     1.62,
                     AtomicCell::new(BoundingBox::new_default(&bounding_box_size)),
@@ -190,6 +200,8 @@ impl Player {
             last_keep_alive_time: AtomicCell::new(std::time::Instant::now()),
             last_attacked_ticks: AtomicU32::new(0),
             cancel_tasks: Notify::new(),
+            client_loaded: AtomicBool::new(false),
+            client_loaded_timeout: AtomicU32::new(60),
             // Minecraft has no why to change the default permission level of new players.
             // Minecrafts default permission level is 0
             permission_lvl: OPERATOR_CONFIG
@@ -233,19 +245,21 @@ impl Player {
             radial_chunks.len()
         );
 
+        let level = &world.level;
+
         // Decrement value of watched chunks
-        let chunks_to_clean = world.level.mark_chunks_as_not_watched(&radial_chunks);
+        let chunks_to_clean = level.mark_chunks_as_not_watched(&radial_chunks);
 
         // Remove chunks with no watchers from the cache
-        world.level.clean_chunks(&chunks_to_clean);
+        level.clean_chunks(&chunks_to_clean).await;
         // Remove left over entries from all possiblily loaded chunks
-        world.level.clean_memory(&radial_chunks);
+        level.clean_memory(&radial_chunks);
 
         log::debug!(
             "Removed player id {} ({}) ({} chunks remain cached)",
             self.gameprofile.name,
             self.client.id,
-            self.world().level.loaded_chunk_count()
+            level.loaded_chunk_count()
         );
 
         //self.world().level.list_cached();
@@ -308,7 +322,7 @@ impl Player {
         {
             world
                 .play_sound(
-                    sound!("entity.player.attack.nodamage"),
+                    Sound::EntityPlayerAttackNodamage,
                     SoundCategory::Players,
                     &pos,
                 )
@@ -317,7 +331,7 @@ impl Player {
         }
 
         world
-            .play_sound(sound!("entity.player.hurt"), SoundCategory::Players, &pos)
+            .play_sound(Sound::EntityPlayerHurt, SoundCategory::Players, &pos)
             .await;
 
         let attack_type = AttackType::new(self, attack_cooldown_progress as f32).await;
@@ -357,6 +371,30 @@ impl Player {
         if config.swing {}
     }
 
+    pub async fn play_sound(
+        &self,
+        sound_id: u16,
+        category: SoundCategory,
+        position: &Vector3<f64>,
+        volume: f32,
+        pitch: f32,
+        seed: f64,
+    ) {
+        self.client
+            .send_packet(&CSoundEffect::new(
+                VarInt(i32::from(sound_id)),
+                None,
+                category,
+                position.x,
+                position.y,
+                position.z,
+                volume,
+                pitch,
+                seed,
+            ))
+            .await;
+    }
+
     pub async fn await_cancel(&self) {
         self.cancel_tasks.notified().await;
     }
@@ -374,6 +412,7 @@ impl Player {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         self.living_entity.tick();
+        self.tick_client_load_timeout();
 
         if now.duration_since(self.last_keep_alive_time.load()) >= Duration::from_secs(15) {
             // We never got a response from our last keep alive we send
@@ -392,6 +431,18 @@ impl Player {
                 .store(id, std::sync::atomic::Ordering::Relaxed);
             self.client.send_packet(&CKeepAlive::new(id)).await;
         }
+    }
+
+    pub fn has_client_loaded(&self) -> bool {
+        self.client_loaded.load(Ordering::Relaxed)
+            || self.client_loaded_timeout.load(Ordering::Relaxed) == 0
+    }
+
+    pub fn set_client_loaded(&self, loaded: bool) {
+        if !loaded {
+            self.client_loaded_timeout.store(60, Ordering::Relaxed);
+        }
+        self.client_loaded.store(loaded, Ordering::Relaxed);
     }
 
     pub fn get_attack_cooldown_progress(&self, base_time: f64, attack_speed: f64) -> f64 {
@@ -509,7 +560,7 @@ impl Player {
         }
     }
 
-    pub fn can_interact_with_block_at(&self, pos: &WorldPosition, additional_range: f64) -> bool {
+    pub fn can_interact_with_block_at(&self, pos: &BlockPos, additional_range: f64) -> bool {
         let d = self.block_interaction_range() + additional_range;
         let box_pos = BoundingBox::from_block(pos);
         let entity_pos = self.living_entity.entity.pos.load();
@@ -557,9 +608,17 @@ impl Player {
             .await;
     }
 
+    pub fn tick_client_load_timeout(&self) {
+        if !self.client_loaded.load(Ordering::Relaxed) {
+            let timeout = self.client_loaded_timeout.load(Ordering::Relaxed);
+            self.client_loaded_timeout
+                .store(timeout.saturating_sub(1), Ordering::Relaxed);
+        }
+    }
+
     pub async fn kill(&self) {
         self.living_entity.kill().await;
-
+        self.set_client_loaded(false);
         self.client
             .send_packet(&CCombatDeath::new(
                 self.entity_id().into(),
@@ -689,8 +748,7 @@ impl Player {
                     .await;
             }
             SChatCommand::PACKET_ID => {
-                self.handle_chat_command(server, SChatCommand::read(bytebuf)?)
-                    .await;
+                self.handle_chat_command(server, &(SChatCommand::read(bytebuf)?));
             }
             SChatMessage::PACKET_ID => {
                 self.handle_chat_message(SChatMessage::read(bytebuf)?).await;
@@ -744,6 +802,7 @@ impl Player {
                 self.handle_player_command(SPlayerCommand::read(bytebuf)?)
                     .await;
             }
+            SPlayerLoaded::PACKET_ID => self.handle_player_loaded(),
             SPlayPingRequest::PACKET_ID => {
                 self.handle_play_ping_request(SPlayPingRequest::read(bytebuf)?)
                     .await;
