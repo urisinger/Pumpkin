@@ -2,17 +2,18 @@ use noise::{NoiseFn, Perlin};
 use pumpkin_core::math::vector2::Vector2;
 
 use crate::{
+    biome::BiomeSupplierImpl,
     chunk::{ChunkBlocks, ChunkData},
     coordinates::{ChunkRelativeBlockCoordinates, ChunkRelativeXZBlockCoordinates},
     WORLD_LOWEST_Y,
 };
 
 use super::{
-    generator::{BiomeGenerator, GeneratorInit, PerlinTerrainGenerator, WorldGenerator},
+    generator::{GeneratorInit, PerlinTerrainGenerator, WorldGenerator},
     Seed,
 };
 
-pub struct GenericGenerator<B: BiomeGenerator, T: PerlinTerrainGenerator> {
+pub struct GenericGenerator<B: BiomeSupplierImpl + Send + Sync, T: PerlinTerrainGenerator> {
     biome_generator: B,
     terrain_generator: T,
     // TODO: May make this optional?. But would be pain to use in most biomes then. Maybe make a new trait like
@@ -20,8 +21,10 @@ pub struct GenericGenerator<B: BiomeGenerator, T: PerlinTerrainGenerator> {
     perlin: Perlin,
 }
 
-impl<B: BiomeGenerator + GeneratorInit, T: PerlinTerrainGenerator + GeneratorInit> GeneratorInit
-    for GenericGenerator<B, T>
+impl<
+        B: BiomeSupplierImpl + GeneratorInit + Send + Sync,
+        T: PerlinTerrainGenerator + GeneratorInit,
+    > GeneratorInit for GenericGenerator<B, T>
 {
     fn new(seed: Seed) -> Self {
         Self {
@@ -32,7 +35,9 @@ impl<B: BiomeGenerator + GeneratorInit, T: PerlinTerrainGenerator + GeneratorIni
     }
 }
 
-impl<B: BiomeGenerator, T: PerlinTerrainGenerator> WorldGenerator for GenericGenerator<B, T> {
+impl<B: BiomeSupplierImpl + Send + Sync, T: PerlinTerrainGenerator> WorldGenerator
+    for GenericGenerator<B, T>
+{
     fn generate_chunk(&self, at: Vector2<i32>) -> ChunkData {
         let mut blocks = ChunkBlocks::default();
         self.terrain_generator.prepare_chunk(&at, &self.perlin);

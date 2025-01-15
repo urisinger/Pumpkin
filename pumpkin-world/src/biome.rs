@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 use crate::generation::{
-    multi_noise_sampler::{BiomeEntries, MultiNoiseSampler},
+    multi_noise_sampler::MultiNoiseSampler,
     noise::density::{NoisePos, UnblendedNoisePos},
+    GeneratorInit, Seed,
 };
 
 pub static BIOME_ENTRIES: LazyLock<BiomeEntries> = LazyLock::new(|| {
@@ -26,32 +27,33 @@ pub enum Biome {
     // TODO list all Biomes
 }
 
-#[derive(Clone)]
-#[enum_dispatch(BiomeSupplierImpl)]
-pub enum BiomeSupplier {
-    Debug(DebugBiomeSupplier),
-}
-
-#[enum_dispatch]
-pub trait BiomeSupplierImpl {
-    fn biome(&self, x: i32, y: i32, z: i32, noise: &mut MultiNoiseSampler) -> Biome;
+pub trait BiomeSupplier {
+    fn biome(&self, x: i32, y: i32, z: i32, noise: &MultiNoiseSampler) -> Biome;
 }
 
 #[derive(Clone)]
 pub struct DebugBiomeSupplier;
 
 impl BiomeSupplierImpl for DebugBiomeSupplier {
-    fn biome(&self, _x: i32, _y: i32, _z: i32, _noise: &mut MultiNoiseSampler) -> Biome {
+    fn biome(&self, _x: i32, _y: i32, _z: i32, _noise: &MultiNoiseSampler) -> Biome {
         Biome::Plains
     }
 }
 
 #[derive(Clone)]
-pub struct MultiNoiseBiomeSource;
+pub struct MultiNoiseBiomeSupplier;
 
-impl BiomeSupplierImpl for MultiNoiseBiomeSource {
-    fn biome(&self, x: i32, y: i32, z: i32, noise: &mut MultiNoiseSampler) -> Biome {
+impl BiomeSupplierImpl for MultiNoiseBiomeSupplier {
+    fn biome(&self, x: i32, y: i32, z: i32, noise: &MultiNoiseSampler) -> Biome {
         BIOME_ENTRIES
             .find_biome(&noise.sample(&NoisePos::Unblended(UnblendedNoisePos::new(x, y, z))))
+    }
+}
+
+pub(crate) struct SuperflatBiomeGenerator {}
+
+impl GeneratorInit for SuperflatBiomeGenerator {
+    fn new(_: Seed) -> Self {
+        Self {}
     }
 }

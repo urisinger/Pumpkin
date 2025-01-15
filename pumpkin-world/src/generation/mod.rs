@@ -22,7 +22,7 @@ use implementation::{
 };
 pub use seed::Seed;
 
-use generator::GeneratorInit;
+pub use generator::GeneratorInit;
 
 pub fn get_world_gen(seed: Seed) -> Box<dyn WorldGenerator> {
     // TODO decide which WorldGenerator to pick based on config.

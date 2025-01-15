@@ -5,7 +5,7 @@ use pumpkin_core::math::vector3::Vector3;
 use crate::biome::Biome;
 use crate::block::block_state::BlockState;
 use crate::chunk::{ChunkBlocks, ChunkData};
-use crate::coordinates::{BlockCoordinates, ChunkRelativeBlockCoordinates, XZBlockCoordinates};
+use crate::coordinates::{BlockCoordinates, ChunkRelativeBlockCoordinates};
 use crate::generation::Seed;
 
 pub trait GeneratorInit {
@@ -14,10 +14,6 @@ pub trait GeneratorInit {
 
 pub trait WorldGenerator: Sync + Send {
     fn generate_chunk(&self, at: Vector2<i32>) -> ChunkData;
-}
-
-pub(crate) trait BiomeGenerator: Sync + Send {
-    fn generate_biome(&self, at: XZBlockCoordinates) -> Biome;
 }
 
 pub(crate) trait TerrainGenerator: Sync + Send {
