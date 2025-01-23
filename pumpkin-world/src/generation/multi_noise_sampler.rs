@@ -1,7 +1,8 @@
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, Map};
+use std::cmp::Ordering;
 
-use crate::biome::Biome;
+use pumpkin_data::chunk::Biome;
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_with::{serde_as, Map};
 
 use super::noise::density::component_functions::SharedComponentReference;
 use super::noise::density::NoisePos;
@@ -16,14 +17,60 @@ pub struct NoiseValuePoint {
     pub humidity: f64,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct NoiseValueRange {
-    pub temperature: [f64; 2],
-    pub erosion: [f64; 2],
-    pub depth: [f64; 2],
-    pub continents: [f64; 2],
-    pub weirdness: [f64; 2],
-    pub humidity: [f64; 2],
+#[derive(Clone, Deserialize)]
+pub struct NoiseHypercube {
+    pub temperature: ParameterRange,
+    pub erosion: ParameterRange,
+    pub depth: ParameterRange,
+    pub continentalness: ParameterRange,
+    pub weirdness: ParameterRange,
+    pub humidity: ParameterRange,
+    pub offset: f64,
+}
+
+impl NoiseHypercube {
+    pub fn to_parameters(&self) -> [ParameterRange; 7] {
+        [
+            self.temperature,
+            self.humidity,
+            self.continentalness,
+            self.erosion,
+            self.depth,
+            self.weirdness,
+            ParameterRange {
+                min: self.offset,
+                max: self.offset,
+            },
+        ]
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParameterRange {
+    pub min: f64,
+    pub max: f64,
+}
+
+impl ParameterRange {
+    pub fn combine(&self, other: &Self) -> Self {
+        Self {
+            min: self.min.min(other.min),
+            max: self.max.max(other.max),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ParameterRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let arr: [f64; 2] = Deserialize::deserialize(deserializer)?;
+        Ok(ParameterRange {
+            min: arr[0],
+            max: arr[1],
+        })
+    }
 }
 
 #[serde_as]
@@ -33,6 +80,7 @@ pub struct BiomeEntries {
     nodes: Vec<(Biome, NoiseValuePoint)>,
 }
 
+#[derive(Clone)]
 pub struct MultiNoiseSampler {
     pub(crate) temperature: SharedComponentReference,
     pub(crate) erosion: SharedComponentReference,
@@ -55,225 +103,171 @@ impl MultiNoiseSampler {
     }
 }
 
-pub struct SearchTree<T> {
+pub struct SearchTree<T: Clone> {
     root: TreeNode<T>,
 }
 
-pub enum TreeNode<T> {
+#[derive(Clone, Debug)]
+pub enum TreeNode<T: Clone> {
     Leaf {
         value: T,
-        point: NoiseValuePoint,
+        point: [ParameterRange; 7],
     },
     Branch {
         children: Vec<TreeNode<T>>,
-        bounds: NoiseValueRange,
+        bounds: [ParameterRange; 7],
     },
 }
 
-impl<T> SearchTree<T> {
-    pub fn new(entries: Vec<(T, NoiseValuePoint)>) -> Self {
-        let root = Self::build_tree(entries);
-        SearchTree { root }
-    }
-
-    fn build_tree(entries: Vec<(T, NoiseValuePoint)>) -> TreeNode<T> {
-        if entries.len() == 1 {
-            let (value, point) = entries.into_iter().next().unwrap();
-            TreeNode::Leaf { value, point }
-        } else {
-            let mid = entries.len() / 2;
-            let mut sorted_entries = entries.clone();
-            sorted_entries
-                .sort_by(|(_, a), (_, b)| (a.temperature).partial_cmp(&b.temperature).unwrap());
-            let (value, point) = sorted_entries[mid].clone();
-            let children = vec![
-                TreeNode::Leaf { value, point },
-                TreeNode::Leaf { value, point },
-            ];
-            TreeNode::Branch {
-                children,
-                bounds: NoiseValueRange {
-                    temperature: [0.0, 1.0],
-                    erosion: [0.0, 1.0],
-                    depth: [0.0, 1.0],
-                    continents: [0.0, 1.0],
-                    weirdness: [0.0, 1.0],
-                    humidity: [0.0, 1.0],
-                },
-            }
-        }
-    }
-
-    pub fn find_best_match(&self, point: &NoiseValuePoint) -> Option<T> {
-        self.find_best_match_recursive(&self.root, point)
-    }
-
-    fn find_best_match_recursive(&self, node: &TreeNode<T>, point: &NoiseValuePoint) -> Option<T> {
-        match node {
-            TreeNode::Leaf {
+impl<T: Clone> TreeNode<T> {
+    pub fn create(entries: Vec<(NoiseHypercube, T)>) -> Self {
+        let leaves: Vec<TreeNode<T>> = entries
+            .into_iter()
+            .map(|(hypercube, value)| TreeNode::Leaf {
                 value,
-                point: node_point,
-            } => {
-                if point == node_point {
-                    Some(value.clone())
-                } else {
-                    None
-                }
-            }
-            TreeNode::Branch {
-                children,
-                bounds: _,
-            } => {
-                for child in children {
-                    if let Some(result) = self.find_best_match_recursive(child, point) {
-                        return Some(result);
-                    }
-                }
-                None
+                point: hypercube.to_parameters(),
+            })
+            .collect();
+
+        Self::create_node(leaves)
+    }
+
+    fn create_node(sub_tree: Vec<TreeNode<T>>) -> TreeNode<T> {
+        if sub_tree.len() == 1 {
+            return sub_tree.into_iter().next().unwrap();
+        } else if sub_tree.len() <= 6 {
+            let mut sorted_sub_tree = sub_tree;
+            sorted_sub_tree.sort_by(|a, b| {
+                let sum_a = Self::calculate_midpoint_sum(a);
+                let sum_b = Self::calculate_midpoint_sum(b);
+                sum_a.partial_cmp(&sum_b).unwrap_or(Ordering::Equal)
+            });
+            let bounds = Self::calculate_bounds(&sorted_sub_tree);
+            return TreeNode::Branch {
+                children: sorted_sub_tree,
+                bounds,
+            };
+        } else {
+            let best_split = (0..7)
+                .map(|param_idx| {
+                    let mut sorted_sub_tree = sub_tree.clone();
+                    Self::sort_tree(&mut sorted_sub_tree, param_idx, false);
+                    let batched_tree = Self::get_batched_tree(sorted_sub_tree);
+
+                    let range_sum: f64 = batched_tree
+                        .iter()
+                        .map(|node| node.calculate_bounds_sum())
+                        .sum();
+
+                    (param_idx, batched_tree, range_sum)
+                })
+                .min_by(|(_, _, range_sum_a), (_, _, range_sum_b)| {
+                    range_sum_a
+                        .partial_cmp(range_sum_b)
+                        .unwrap_or(Ordering::Equal)
+                });
+
+            if let Some((best_param, mut best_batched, _)) = best_split {
+                Self::sort_tree(&mut best_batched, best_param, true);
+                let children: Vec<TreeNode<T>> = best_batched
+                    .into_iter()
+                    .map(|batch| Self::create_node(batch.children().to_vec()))
+                    .collect();
+                return TreeNode::Branch {
+                    bounds: Self::calculate_bounds(&children),
+                    children,
+                };
             }
         }
+
+        panic!("Failed to create a node");
     }
-}
 
-impl NoiseValuePoint {
-    pub fn distance_squared(&self, other: &Self) -> f64 {
-        let temp_diff = self.temperature - other.temperature;
-        let erosion_diff = self.erosion - other.erosion;
-        let depth_diff = self.depth - other.depth;
-        let continents_diff = self.continents - other.continents;
-        let weirdness_diff = self.weirdness - other.weirdness;
-        let humidity_diff = self.humidity - other.humidity;
+    fn sort_tree(sub_tree: &mut Vec<TreeNode<T>>, parameter_offset: usize, abs: bool) {
+        sub_tree.sort_by(|a, b| {
+            for i in 0..7 {
+                // Calculate the parameter index in cyclic order
+                let current_param = (parameter_offset + i) % 7;
 
-        temp_diff * temp_diff
-            + erosion_diff * erosion_diff
-            + depth_diff * depth_diff
-            + continents_diff * continents_diff
-            + weirdness_diff * weirdness_diff
-            + humidity_diff * humidity_diff
+                // Get the midpoints for the current parameter
+                let mid_a = Self::get_midpoint(a, current_param);
+                let mid_b = Self::get_midpoint(b, current_param);
+
+                // Apply absolute value if required
+                let val_a = if abs { mid_a.abs() } else { mid_a };
+                let val_b = if abs { mid_b.abs() } else { mid_b };
+
+                // Compare the values
+                match val_a.partial_cmp(&val_b) {
+                    Some(Ordering::Equal) | None => continue, // Move to the next parameter if equal
+                    Some(non_equal) => return non_equal,      // Return the result if not equal
+                }
+            }
+
+            Ordering::Equal
+        });
     }
-}
 
-impl BiomeEntries {
-    pub fn find_biome(&self, point: &NoiseValuePoint) -> Biome {
-        let mut closest_biome = None;
-        let mut min_distance = f64::MAX;
+    fn get_midpoint(&self, parameter: usize) -> f64 {
+        let range = &self.bounds()[parameter];
+        (range.min + range.max) / 2.0
+    }
 
-        for (biome, range) in &self.nodes {
-            let distance = range.distance_squared(point);
-            if distance < min_distance {
-                min_distance = distance;
-                closest_biome = Some(biome);
+    fn get_batched_tree(nodes: Vec<TreeNode<T>>) -> Vec<TreeNode<T>> {
+        if nodes.is_empty() {
+            return Vec::new();
+        }
+
+        // Calculate the chunk size using the heuristic
+        let node_count = nodes.len();
+        let chunk_size = (6.0f64.powf((node_count as f64 - 0.01).log(6.0).floor())) as usize;
+
+        nodes
+            .chunks(chunk_size)
+            .map(|chunk: &[TreeNode<T>]| TreeNode::Branch {
+                children: chunk.to_vec(), // Convert the slice into a Vec<TreeNode<T>>
+                bounds: Self::calculate_bounds(chunk), // Calculate bounds for this chunk
+            })
+            .collect()
+    }
+
+    fn calculate_midpoint_sum(&self) -> f64 {
+        self.bounds()
+            .iter()
+            .map(|range| (range.min + range.max).abs() / 2.0)
+            .sum()
+    }
+
+    fn calculate_bounds_sum(&self) -> f64 {
+        self.bounds()
+            .iter()
+            .map(|range| range.max - range.min)
+            .sum()
+    }
+
+    fn calculate_bounds(nodes: &[TreeNode<T>]) -> [ParameterRange; 7] {
+        let mut bounds = *nodes[0].bounds();
+
+        for node in nodes.iter().skip(1) {
+            for (i, range) in node.bounds().iter().enumerate() {
+                bounds[i] = bounds[i].combine(range);
             }
         }
 
-        closest_biome.unwrap_or(Biome::Plains) // Default biome if none matches.
+        bounds
     }
-}
 
-fn main() {
-    // Example usage
-    let biomes = vec![
-        (
-            Biome::Plains,
-            NoiseValuePoint {
-                temperature: 0.8,
-                erosion: 0.3,
-                depth: 0.1,
-                continents: 0.5,
-                weirdness: 0.4,
-                humidity: 0.9,
-            },
-        ),
-        (
-            Biome::SnowyTiga,
-            NoiseValuePoint {
-                temperature: -0.5,
-                erosion: 0.1,
-                depth: 0.2,
-                continents: 0.7,
-                weirdness: 0.2,
-                humidity: 0.4,
-            },
-        ),
-    ];
-
-    let search_tree = SearchTree::new(biomes);
-
-    let query = NoiseValuePoint {
-        temperature: 0.7,
-        erosion: 0.3,
-        depth: 0.1,
-        continents: 0.5,
-        weirdness: 0.4,
-        humidity: 0.8,
-    };
-
-    let result = search_tree.find_best_match(&query);
-    println!("{:?}", result);
-}
-impl NoiseValuePoint {
-    /// Calculates the squared distance between two NoiseValuePoints.
-    pub fn distance_squared(&self, other: &Self) -> f64 {
-        let temp_diff = self.temperature - other.temperature;
-        let erosion_diff = self.erosion - other.erosion;
-        let depth_diff = self.depth - other.depth;
-        let continents_diff = self.continents - other.continents;
-        let weirdness_diff = self.weirdness - other.weirdness;
-        let humidity_diff = self.humidity - other.humidity;
-
-        temp_diff * temp_diff
-            + erosion_diff * erosion_diff
-            + depth_diff * depth_diff
-            + continents_diff * continents_diff
-            + weirdness_diff * weirdness_diff
-            + humidity_diff * humidity_diff
+    pub fn bounds(&self) -> &[ParameterRange; 7] {
+        match self {
+            TreeNode::Leaf { point, .. } => point,
+            TreeNode::Branch { bounds, .. } => bounds,
+        }
     }
-}
 
-// Example usage:
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_biome_search_tree() {
-        let biomes = vec![
-            (
-                Biome::Plains,
-                NoiseValuePoint {
-                    temperature: 0.8,
-                    erosion: 0.3,
-                    depth: 0.1,
-                    continents: 0.5,
-                    weirdness: 0.4,
-                    humidity: 0.9,
-                },
-            ),
-            (
-                Biome::SnowyTiga,
-                NoiseValuePoint {
-                    temperature: -0.5,
-                    erosion: 0.1,
-                    depth: 0.2,
-                    continents: 0.7,
-                    weirdness: 0.2,
-                    humidity: 0.4,
-                },
-            ),
-        ];
-
-        let search_tree = BiomeEntries::new(biomes);
-
-        let query = NoiseValuePoint {
-            temperature: 0.7,
-            erosion: 0.3,
-            depth: 0.1,
-            continents: 0.5,
-            weirdness: 0.4,
-            humidity: 0.8,
-        };
-
-        let result = search_tree.find_biome(&query);
-        assert_eq!(result, Biome::Plains);
+    pub fn children(&self) -> &[TreeNode<T>] {
+        match self {
+            TreeNode::Leaf { .. } => &[],
+            TreeNode::Branch { children, .. } => children,
+        }
     }
 }

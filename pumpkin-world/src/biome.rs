@@ -4,38 +4,45 @@ use enum_dispatch::enum_dispatch;
 use serde::{Deserialize, Serialize};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
-use crate::generation::{
-    multi_noise_sampler::MultiNoiseSampler,
-    noise::density::{NoisePos, UnblendedNoisePos},
-    GeneratorInit, Seed,
+use crate::{
+    coordinates::BlockCoordinates,
+    generation::{
+        multi_noise_sampler::{BiomeEntries, MultiNoiseSampler},
+        noise::density::{NoisePos, UnblendedNoisePos},
+        GeneratorInit, Seed,
+    },
 };
+
+use pumpkin_data::chunk::Biome;
 
 pub static BIOME_ENTRIES: LazyLock<BiomeEntries> = LazyLock::new(|| {
     serde_json::from_str(include_str!("../../assets/multi_noise.json"))
         .expect("Could not parse synced_registries.json registry.")
 });
-use pumpkin_data::chunk::Biome;
 
 pub trait BiomeSupplier {
-    fn biome(&self, x: i32, y: i32, z: i32, noise: &MultiNoiseSampler) -> Biome;
+    fn biome(&self, at: BlockCoordinates) -> Biome;
 }
 
 #[derive(Clone)]
 pub struct DebugBiomeSupplier;
 
 impl BiomeSupplier for DebugBiomeSupplier {
-    fn biome(&self, _x: i32, _y: i32, _z: i32, _noise: &MultiNoiseSampler) -> Biome {
+    fn biome(&self, _at: BlockCoordinates) -> Biome {
         Biome::Plains
     }
 }
 
 #[derive(Clone)]
-pub struct MultiNoiseBiomeSupplier;
+pub struct MultiNoiseBiomeSupplier{noise: MultiNoiseSampler};
 
 impl BiomeSupplier for MultiNoiseBiomeSupplier {
-    fn biome(&self, x: i32, y: i32, z: i32, noise: &MultiNoiseSampler) -> Biome {
-        BIOME_ENTRIES
-            .find_biome(&noise.sample(&NoisePos::Unblended(UnblendedNoisePos::new(x, y, z))))
+    fn biome(&self, at: BlockCoordinates) -> Biome {
+        BIOME_ENTRIES.find_biome(&noise.sample(&NoisePos::Unblended(UnblendedNoisePos::new(
+            at.x,
+            at.y.0 as i32,
+            at.z,
+        ))))
     }
 }
 

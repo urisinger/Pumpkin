@@ -18,7 +18,7 @@ mod seed;
 pub use generator::WorldGenerator;
 use implementation::{
     //overworld::biome::plains::PlainsGenerator,
-    test::{TestBiomeGenerator, TestGenerator, TestTerrainGenerator},
+    test::{TestGenerator, TestTerrainGenerator},
 };
 pub use seed::Seed;
 
