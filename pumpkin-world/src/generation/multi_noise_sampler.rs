@@ -25,7 +25,7 @@ pub struct NoiseHypercube {
     pub continentalness: ParameterRange,
     pub weirdness: ParameterRange,
     pub humidity: ParameterRange,
-    pub offset: f64,
+    pub offset: i64,
 }
 
 impl NoiseHypercube {
@@ -47,8 +47,8 @@ impl NoiseHypercube {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParameterRange {
-    pub min: f64,
-    pub max: f64,
+    pub min: i64,
+    pub max: i64,
 }
 
 impl ParameterRange {
@@ -67,10 +67,14 @@ impl<'de> Deserialize<'de> for ParameterRange {
     {
         let arr: [f64; 2] = Deserialize::deserialize(deserializer)?;
         Ok(ParameterRange {
-            min: arr[0],
-            max: arr[1],
+            min: to_long(arr[0]),
+            max: to_long(arr[1]),
         })
     }
+}
+
+fn to_long(float: f64) -> i64 {
+    (float * 1000.0) as i64
 }
 
 #[serde_as]
@@ -132,6 +136,41 @@ impl<T: Clone> TreeNode<T> {
         Self::create_node(leaves)
     }
 
+    /*fn get_resulting_node(
+        &self,
+        other_parameters: &[i64],
+        distance_function: &dyn Fn(&TreeNode<T>, &[i64]) -> i64,
+    ) -> Option<(T, [ParameterRange; 7])> {
+        match self {
+            TreeNode::Leaf { value, point } => (value, point),
+            TreeNode::Branch { children, bounds } => {
+                let mut closest_node = None;
+                let mut smallest_distance = i64::MAX;
+
+                for tree_node in sub_tree {
+                    let distance = distance_function(tree_node, other_parameters);
+                    if distance < smallest_distance {
+                        if let Some(resulting_node) =
+                            tree_node.get_resulting_node(other_parameters, distance_function)
+                        {
+                            let resulting_distance =
+                                distance_function(&resulting_node, other_parameters);
+                            if resulting_distance < smallest_distance {
+                                smallest_distance = resulting_distance;
+                                closest_node = Some(resulting_node);
+                            }
+                        } else {
+                            smallest_distance = distance;
+                            closest_node = tree_node.as_leaf();
+                        }
+                    }
+                }
+
+                closest_node
+            }
+        }
+    }*/
+
     fn create_node(sub_tree: Vec<TreeNode<T>>) -> TreeNode<T> {
         if sub_tree.len() == 1 {
             return sub_tree.into_iter().next().unwrap();
@@ -140,7 +179,7 @@ impl<T: Clone> TreeNode<T> {
             sorted_sub_tree.sort_by(|a, b| {
                 let sum_a = Self::calculate_midpoint_sum(a);
                 let sum_b = Self::calculate_midpoint_sum(b);
-                sum_a.partial_cmp(&sum_b).unwrap_or(Ordering::Equal)
+                sum_a.cmp(&sum_b)
             });
             let bounds = Self::calculate_bounds(&sorted_sub_tree);
             return TreeNode::Branch {
@@ -148,24 +187,22 @@ impl<T: Clone> TreeNode<T> {
                 bounds,
             };
         } else {
+            // This is used to minimize the range each subtree takes, so that
+            // the resulting tree is more balanced and efficient for searches.
             let best_split = (0..7)
                 .map(|param_idx| {
                     let mut sorted_sub_tree = sub_tree.clone();
                     Self::sort_tree(&mut sorted_sub_tree, param_idx, false);
                     let batched_tree = Self::get_batched_tree(sorted_sub_tree);
 
-                    let range_sum: f64 = batched_tree
+                    let range_sum: i64 = batched_tree
                         .iter()
                         .map(|node| node.calculate_bounds_sum())
                         .sum();
 
                     (param_idx, batched_tree, range_sum)
                 })
-                .min_by(|(_, _, range_sum_a), (_, _, range_sum_b)| {
-                    range_sum_a
-                        .partial_cmp(range_sum_b)
-                        .unwrap_or(Ordering::Equal)
-                });
+                .min_by(|(_, _, range_sum_a), (_, _, range_sum_b)| range_sum_a.cmp(range_sum_b));
 
             if let Some((best_param, mut best_batched, _)) = best_split {
                 Self::sort_tree(&mut best_batched, best_param, true);
@@ -198,9 +235,9 @@ impl<T: Clone> TreeNode<T> {
                 let val_b = if abs { mid_b.abs() } else { mid_b };
 
                 // Compare the values
-                match val_a.partial_cmp(&val_b) {
-                    Some(Ordering::Equal) | None => continue, // Move to the next parameter if equal
-                    Some(non_equal) => return non_equal,      // Return the result if not equal
+                match val_a.cmp(&val_b) {
+                    Ordering::Equal => continue,   // Move to the next parameter if equal
+                    non_equal => return non_equal, // Return the result if not equal
                 }
             }
 
@@ -208,9 +245,9 @@ impl<T: Clone> TreeNode<T> {
         });
     }
 
-    fn get_midpoint(&self, parameter: usize) -> f64 {
+    fn get_midpoint(&self, parameter: usize) -> i64 {
         let range = &self.bounds()[parameter];
-        (range.min + range.max) / 2.0
+        (range.min + range.max) / 2
     }
 
     fn get_batched_tree(nodes: Vec<TreeNode<T>>) -> Vec<TreeNode<T>> {
@@ -231,14 +268,14 @@ impl<T: Clone> TreeNode<T> {
             .collect()
     }
 
-    fn calculate_midpoint_sum(&self) -> f64 {
+    fn calculate_midpoint_sum(&self) -> i64 {
         self.bounds()
             .iter()
-            .map(|range| (range.min + range.max).abs() / 2.0)
+            .map(|range| (range.min + range.max).abs() / 2)
             .sum()
     }
 
-    fn calculate_bounds_sum(&self) -> f64 {
+    fn calculate_bounds_sum(&self) -> i64 {
         self.bounds()
             .iter()
             .map(|range| range.max - range.min)
