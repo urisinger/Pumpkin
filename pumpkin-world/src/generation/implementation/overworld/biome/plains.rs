@@ -6,7 +6,6 @@ use rand::Rng;
 
 use crate::{
     chunk::Subchunks,
-    coordinates::{BlockCoordinates, ChunkRelativeBlockCoordinates},
     coordinates::{BlockCoordinates, ChunkRelativeBlockCoordinates, XZBlockCoordinates},
     generation::{
         generator::{GeneratorInit, PerlinTerrainGenerator},
