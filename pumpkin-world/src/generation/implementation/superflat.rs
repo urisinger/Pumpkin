@@ -3,7 +3,7 @@ use pumpkin_util::math::vector2::Vector2;
 
 use crate::{
     biome::SuperflatBiomeGenerator,
-    block::block_state::BlockState,
+    block::state::BlockState,
     coordinates::XZBlockCoordinates,
     generation::{
         generator::{GeneratorInit, TerrainGenerator},

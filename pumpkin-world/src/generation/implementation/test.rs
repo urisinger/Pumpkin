@@ -10,7 +10,7 @@ use pumpkin_util::math::{vector2::Vector2, vector3::Vector3};
 
 use crate::{
     biome::BiomeSupplier,
-    block::block_state::BlockState,
+    block::state::BlockState,
     chunk::{ChunkData, Subchunks},
     coordinates::{ChunkRelativeBlockCoordinates, ChunkRelativeXZBlockCoordinates},
     generation::{
@@ -44,14 +44,6 @@ impl<B: BiomeSupplier + Send + Sync, T: TerrainGenerator> WorldGenerator for Tes
 
         for x in 0..16u8 {
             for z in 0..16u8 {
-                let biome = self.biome_generator.generate_biome(
-                    ChunkRelativeXZBlockCoordinates {
-                        x: x.into(),
-                        z: z.into(),
-                    }
-                    .with_chunk_coordinates(at),
-                );
-
                 // TODO: This can be chunk specific
                 for y in (WORLD_LOWEST_Y..WORLD_MAX_Y).rev() {
                     let coordinates = ChunkRelativeBlockCoordinates {
@@ -59,6 +51,9 @@ impl<B: BiomeSupplier + Send + Sync, T: TerrainGenerator> WorldGenerator for Tes
                         y: y.into(),
                         z: z.into(),
                     };
+                    let biome = self
+                        .biome_generator
+                        .biome(coordinates.with_chunk_coordinates(at));
 
                     let block = self.terrain_generator.generate_block(
                         &at,
