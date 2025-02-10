@@ -1,10 +1,14 @@
 use core::f32;
 use std::sync::{atomic::AtomicBool, Arc};
 
+use async_trait::async_trait;
 use crossbeam::atomic::AtomicCell;
 use pumpkin_data::entity::{EntityPose, EntityType};
+use pumpkin_nbt::{compound::NbtCompound, tag::NbtTag};
 use pumpkin_protocol::{
-    client::play::{CHeadRot, CSetEntityMetadata, CTeleportEntity, CUpdateEntityRot, Metadata},
+    client::play::{
+        CHeadRot, CSetEntityMetadata, CSpawnEntity, CTeleportEntity, CUpdateEntityRot, Metadata,
+    },
     codec::var_int::VarInt,
 };
 use pumpkin_util::math::{
@@ -15,6 +19,7 @@ use pumpkin_util::math::{
     vector3::Vector3,
     wrap_degrees,
 };
+use uuid::Uuid;
 
 use crate::world::World;
 
@@ -204,6 +209,26 @@ impl Entity {
         self.world.remove_entity(self).await;
     }
 
+    pub fn create_spawn_packet(&self, uuid: Uuid) -> CSpawnEntity {
+        let entity_loc = self.pos.load();
+        let entity_vel = self.velocity.load();
+        CSpawnEntity::new(
+            VarInt(self.entity_id),
+            uuid,
+            VarInt((self.entity_type) as i32),
+            entity_loc.x,
+            entity_loc.y,
+            entity_loc.z,
+            self.pitch.load(),
+            self.yaw.load(),
+            self.head_yaw.load(), // todo: head_yaw and yaw are swapped, find out why
+            0.into(),
+            entity_vel.x as f32,
+            entity_vel.y as f32,
+            entity_vel.z as f32,
+        )
+    }
+
     /// Applies knockback to the entity, following vanilla Minecraft's mechanics.
     ///
     /// This function calculates the entity's new velocity based on the specified knockback strength and direction.
@@ -280,6 +305,63 @@ impl Entity {
         );
         self.world.broadcast_packet_all(&packet).await;
     }
+}
+
+#[async_trait]
+impl NBTStorage for Entity {
+    async fn write_nbt(&self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        let position = self.pos.load();
+        nbt.put(
+            "Pos",
+            NbtTag::List(vec![
+                position.x.into(),
+                position.y.into(),
+                position.z.into(),
+            ]),
+        );
+        let velocity = self.velocity.load();
+        nbt.put(
+            "Motion",
+            NbtTag::List(vec![
+                velocity.x.into(),
+                velocity.y.into(),
+                velocity.z.into(),
+            ]),
+        );
+        nbt.put(
+            "Rotation",
+            NbtTag::List(vec![self.yaw.load().into(), self.pitch.load().into()]),
+        );
+
+        // todo more...
+    }
+
+    async fn read_nbt(&mut self, nbt: &mut pumpkin_nbt::compound::NbtCompound) {
+        let position = nbt.get_list("Pos").unwrap();
+        let x = position[0].extract_double().unwrap_or(0.0);
+        let y = position[1].extract_double().unwrap_or(0.0);
+        let z = position[2].extract_double().unwrap_or(0.0);
+        self.pos.store(Vector3::new(x, y, z));
+        let velocity = nbt.get_list("Motion").unwrap();
+        let x = velocity[0].extract_double().unwrap_or(0.0);
+        let y = velocity[1].extract_double().unwrap_or(0.0);
+        let z = velocity[2].extract_double().unwrap_or(0.0);
+        self.velocity.store(Vector3::new(x, y, z));
+        let rotation = nbt.get_list("Rotation").unwrap();
+        let yaw = rotation[0].extract_float().unwrap_or(0.0);
+        let pitch = rotation[1].extract_float().unwrap_or(0.0);
+        self.yaw.store(yaw);
+        self.pitch.store(pitch);
+
+        // todo more...
+    }
+}
+
+#[async_trait]
+pub trait NBTStorage: Send + Sync {
+    async fn write_nbt(&self, nbt: &mut NbtCompound);
+
+    async fn read_nbt(&mut self, nbt: &mut NbtCompound);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

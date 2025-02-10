@@ -34,11 +34,11 @@ impl BiomeSupplier for DebugBiomeSupplier {
 }
 
 #[derive(Clone)]
-pub struct MultiNoiseBiomeSupplier{noise: MultiNoiseSampler};
+pub struct MultiNoiseBiomeSupplier{noise: MultiNoiseSampler}
 
 impl BiomeSupplier for MultiNoiseBiomeSupplier {
     fn biome(&self, at: BlockCoordinates) -> Biome {
-        BIOME_ENTRIES.find_biome(&noise.sample(&NoisePos::Unblended(UnblendedNoisePos::new(
+        BIOME_ENTRIES.find_biome(&self.noise.sample(&NoisePos::Unblended(UnblendedNoisePos::new(
             at.x,
             at.y.0 as i32,
             at.z,

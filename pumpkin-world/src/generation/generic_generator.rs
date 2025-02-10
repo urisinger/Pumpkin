@@ -3,7 +3,6 @@ use pumpkin_util::math::vector2::Vector2;
 
 use crate::{
     biome::BiomeSupplier,
-    chunk::ChunkData,
     chunk::{ChunkData, Subchunks},
     coordinates::{ChunkRelativeBlockCoordinates, ChunkRelativeXZBlockCoordinates},
     WORLD_LOWEST_Y,
