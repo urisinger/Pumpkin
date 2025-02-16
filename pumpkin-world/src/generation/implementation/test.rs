@@ -83,14 +83,6 @@ impl<B: BiomeSupplierImpl + Send + Sync, T: TerrainGenerator> WorldGenerator
     }
 }
 
-pub(crate) struct TestBiomeGenerator {}
-
-impl GeneratorInit for TestBiomeGenerator {
-    fn new(_: Seed) -> Self {
-        Self {}
-    }
-}
-
 pub(crate) struct TestTerrainGenerator {
     chunks: DashMap<Vector2<i32>, (ProtoChunk, Wrapping<u8>)>,
     seed: Seed,
