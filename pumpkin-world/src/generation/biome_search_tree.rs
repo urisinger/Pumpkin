@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 
+use pumpkin_data::chunk::Biome;
 use serde::{Deserialize, Deserializer};
 
 use super::noise_router::multi_noise_sampler::{to_long, NoiseValuePoint};
@@ -67,34 +68,36 @@ impl ParameterRange {
 }
 
 #[derive(Clone, Deserialize)]
-pub struct BiomeEntries<T> {
-    nodes: Vec<(T, NoiseHypercube)>,
+pub struct BiomeEntries {
+    pub nodes: Vec<(Biome, NoiseHypercube)>,
 }
 
 #[derive(Clone)]
 pub struct SearchTree<T: Clone> {
     root: TreeNode<T>,
-    last_result_node: Option<TreeLeafNode<T>>,
 }
 
 impl<T: Clone> SearchTree<T> {
-    pub fn create(entries: Vec<(NoiseHypercube, T)>) -> Option<Self> {
+    pub fn create(entries: Vec<(T, NoiseHypercube)>) -> Option<Self> {
         if entries.is_empty() {
             return None;
         }
 
         let leaves: Vec<TreeNode<T>> = entries
             .into_iter()
-            .map(|(hypercube, value)| TreeNode::new_leaf(value, hypercube.to_parameters()))
+            .map(|(value, hypercube)| TreeNode::new_leaf(value, hypercube.to_parameters()))
             .collect();
 
         Some(SearchTree {
             root: create_node(leaves),
-            last_result_node: None,
         })
     }
 
-    pub fn get(&mut self, point: &NoiseValuePoint) -> Option<T> {
+    pub fn get(
+        &self,
+        point: &NoiseValuePoint,
+        last_result_node: &mut Option<TreeLeafNode<T>>,
+    ) -> Option<T> {
         let point = &[
             point.temperature,
             point.humidity,
@@ -104,9 +107,9 @@ impl<T: Clone> SearchTree<T> {
             point.weirdness,
             0,
         ];
-        let result_node = self.root.get_node(point, &self.last_result_node);
+        let result_node = self.root.get_node(point, last_result_node);
         let result = result_node.clone().map(|node| node.value);
-        self.last_result_node = result_node;
+        *last_result_node = result_node;
         result
     }
 }
@@ -248,7 +251,7 @@ pub enum TreeNode<T: Clone> {
 }
 
 #[derive(Clone)]
-struct TreeLeafNode<T: Clone> {
+pub struct TreeLeafNode<T: Clone> {
     value: T,
     point: [ParameterRange; 7],
 }

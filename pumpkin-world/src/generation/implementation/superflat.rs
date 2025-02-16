@@ -2,9 +2,7 @@ use pumpkin_data::chunk::Biome;
 use pumpkin_util::math::vector2::Vector2;
 
 use crate::{
-    biome::SuperflatBiomeGenerator,
     block::state::BlockState,
-    coordinates::XZBlockCoordinates,
     generation::{
         generator::{GeneratorInit, TerrainGenerator},
         generic_generator::GenericGenerator,
@@ -14,6 +12,14 @@ use crate::{
 
 #[expect(dead_code)]
 pub type SuperflatGenerator = GenericGenerator<SuperflatBiomeGenerator, SuperflatTerrainGenerator>;
+
+pub(crate) struct SuperflatBiomeGenerator {}
+
+impl GeneratorInit for SuperflatBiomeGenerator {
+    fn new(_: Seed) -> Self {
+        Self {}
+    }
+}
 
 pub(crate) struct SuperflatTerrainGenerator {}
 

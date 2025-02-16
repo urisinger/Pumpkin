@@ -61,7 +61,7 @@ pub struct MultiNoiseSampler<'a> {
 }
 
 impl<'a> MultiNoiseSampler<'a> {
-    pub fn sample(&mut self, biome_x: i32, biome_y: i32, biome_z: i32) -> NoiseValuePoint {
+    pub fn sample(&self, biome_x: i32, biome_y: i32, biome_z: i32) -> NoiseValuePoint {
         let block_x = biome_coords::to_block(biome_x);
         let block_y = biome_coords::to_block(biome_y);
         let block_z = biome_coords::to_block(biome_z);
